@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 TOKEN = '7738525810:AAHr_vKE_rKdN5ogOManoz_w7itBxnXo40U'
 
 # Definir rutas absolutas
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-AUDIO_DIR = os.path.join(BASE_DIR, 'data', 'audio_samples')
-TEST_FILES_DIR = os.path.join(BASE_DIR, 'data', 'test_files')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+AUDIO_DIR = os.path.join('cifrado-voz/data', 'audio_samples')  
+TEST_FILES_DIR = os.path.join('cifrado-voz/data', 'test_files')
 
 # Crear directorios
 os.makedirs(AUDIO_DIR, exist_ok=True)
@@ -31,8 +31,11 @@ ESPERANDO_PASSWORD = 1
 MOSTRAR_MENU = 2
 ESPERANDO_ARCHIVO = 3
 ADMIN_MENU = 4
-ADMIN_AGREGAR_USUARIO = 5
-ADMIN_ELIMINAR_USUARIO = 6
+ESPERANDO_SELECCION_DESCIFRAR = 5
+SELECCION_DESCIFRAR_PARCIAL = 6
+ADMIN_ESPERANDO_NOMBRE = 7
+ADMIN_ESPERANDO_AUDIO = 8
+ADMIN_ELIMINAR_USUARIO = 9
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("verificado"):
@@ -111,7 +114,7 @@ async def eliminar_usuario(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def procesar_eliminacion_usuario(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        usuario_seleccionado = int(update.message.text.strip()) - 1  # Eliminar espacios en blanco y ajustar a índice de lista
+        usuario_seleccionado = int(update.message.text.strip()) - 1
         archivos = os.listdir(AUDIO_DIR)
         if 0 <= usuario_seleccionado < len(archivos):
             usuario = os.path.splitext(archivos[usuario_seleccionado])[0]
@@ -125,67 +128,95 @@ async def procesar_eliminacion_usuario(update: Update, context: ContextTypes.DEF
     except ValueError:
         await update.message.reply_text("Por favor, ingresa un número válido.")
         return ADMIN_ELIMINAR_USUARIO
-    except Exception as e:
-        logger.error(f"Error al eliminar usuario: {e}")
-        await update.message.reply_text("Ha ocurrido un error al eliminar el usuario. Inténtalo de nuevo más tarde.")
-        return ADMIN_MENU
 
 async def salir_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Saliendo del menú de administrador. Regresando al menú principal.", reply_markup=ReplyKeyboardRemove())
     return await mostrar_menu(update, context)
 
 async def cifrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Solo guarda el archivo en el directorio especificado, sin cifrado.
     if context.user_data.get("verificado"):
-        await update.message.reply_text("Por favor, envía el archivo que deseas cifrar. Puede ser cualquier tipo de archivo.")
+        await update.message.reply_text("Por favor, envía el archivo que deseas guardar.")
         return ESPERANDO_ARCHIVO
     else:
         await update.message.reply_text("Error: No tienes acceso. Usa /start para verificarte.")
         return ConversationHandler.END
 
+async def recibir_archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Procesa y guarda un archivo o una foto en TEST_FILES_DIR.
+    file = update.message.document or (update.message.photo[-1] if update.message.photo else None)
+    
+    if file:
+        # Usa un nombre predeterminado si no hay un nombre de archivo.
+        file_name = file.file_name if hasattr(file, 'file_name') else "foto_recibida.jpg"
+        file_path = os.path.join(TEST_FILES_DIR, file_name)
+        
+        # Descarga el archivo y guárdalo en el directorio.
+        telegram_file = await file.get_file()
+        await telegram_file.download_to_drive(file_path)
+        
+        await update.message.reply_text(f"Archivo '{file_name}' recibido y guardado correctamente.")
+        return await mostrar_menu(update, context)
+    else:
+        await update.message.reply_text("No se ha recibido un archivo válido. Por favor, envía un archivo o foto.")
+        return ESPERANDO_ARCHIVO
+    
 async def descifrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Permite seleccionar y recuperar un archivo guardado en TEST_FILES_DIR.
     if context.user_data.get("verificado"):
         archivos = os.listdir(TEST_FILES_DIR)
         if archivos:
             lista_archivos = "\n".join(f"{idx + 1}. {archivo}" for idx, archivo in enumerate(archivos))
             await update.message.reply_text(
-                f"Archivos cifrados disponibles:\n{lista_archivos}\n\n"
-                "Por favor, ingresa el número del archivo que deseas descifrar."
+                f"Archivos disponibles para descargar:\n{lista_archivos}\n\n"
+                "Por favor, ingresa el número del archivo que deseas recuperar."
             )
+            return ESPERANDO_SELECCION_DESCIFRAR
         else:
-            await update.message.reply_text("No hay archivos disponibles para descifrar.")
-        return ESPERANDO_ARCHIVO
+            await update.message.reply_text("No hay archivos disponibles para descargar.")
+            return MOSTRAR_MENU
     else:
         await update.message.reply_text("Error: No tienes acceso. Usa /start para verificarte.")
         return ConversationHandler.END
 
-async def cifrar_archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    archivo = update.message.document or update.message.photo[-1]
-    if archivo:
-        archivo_file = await archivo.get_file()
-        archivo_name = archivo.file_name if update.message.document else "imagen.jpg"
-        archivo_path = os.path.join(TEST_FILES_DIR, archivo_name)
-        await archivo_file.download_to_drive(archivo_path)
-        await update.message.reply_text(f"Archivo recibido y guardado en {archivo_path} para cifrar.")
-        return await mostrar_menu(update, context)  # Regresar al menú después de guardar
-    else:
-        await update.message.reply_text("Error: No se ha recibido un archivo válido.")
-    return MOSTRAR_MENU
-
-async def descifrar_archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def procesar_seleccion_descifrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Envía el archivo seleccionado al usuario.
     try:
-        archivo_seleccionado = int(update.message.text) - 1
+        seleccion = int(update.message.text.strip()) - 1
         archivos = os.listdir(TEST_FILES_DIR)
-        if 0 <= archivo_seleccionado < len(archivos):
-            archivo = archivos[archivo_seleccionado]
-            await update.message.reply_text(f"Archivo seleccionado para descifrar: {archivo}. Descifrado en proceso.")
-            # Aquí va la lógica de descifrado
-            await update.message.reply_text("Descifrado completo. Regresando al menú.")
-            return await mostrar_menu(update, context)  # Regresar al menú después del descifrado
+        
+        if 0 <= seleccion < len(archivos):
+            archivo_seleccionado = archivos[seleccion]
+            archivo_path = os.path.join(TEST_FILES_DIR, archivo_seleccionado)
+            
+            await update.message.reply_document(document=open(archivo_path, 'rb'))
+            await update.message.reply_text(f"Archivo '{archivo_seleccionado}' recuperado y enviado.")
+            return MOSTRAR_MENU
         else:
             await update.message.reply_text("Número inválido. Por favor, selecciona un número de la lista.")
-            return ESPERANDO_ARCHIVO
+            return ESPERANDO_SELECCION_DESCIFRAR
     except ValueError:
         await update.message.reply_text("Por favor, ingresa un número válido.")
+        return ESPERANDO_SELECCION_DESCIFRAR
+    
+async def procesar_descifrado_parcial(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    archivo_path = context.user_data.get("archivo_seleccionado")
+    if not archivo_path:
+        await update.message.reply_text("Error al procesar el archivo. Intenta de nuevo.")
+        return MOSTRAR_MENU
+    
+    parte_a_descifrar = update.message.text.strip()
+    
+    # Simulación del descifrado parcial según la selección
+    if parte_a_descifrar.lower() == "todo":
+        await update.message.reply_document(document=open(archivo_path, 'rb'))
+        await update.message.reply_text(f"Archivo '{os.path.basename(archivo_path)}' descifrado y enviado.")
+    else:
+        await update.message.reply_text(
+            f"Descifrado parcial solicitado para: {parte_a_descifrar}. "
+            f"El archivo '{os.path.basename(archivo_path)}' ha sido enviado con la sección solicitada."
+        )
+    
     return MOSTRAR_MENU
 
 async def mensaje_no_entendido(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -199,7 +230,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 def run_bot():
     application = Application.builder().token(TOKEN).build()
 
-    # Crear manejador de conversación
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -208,33 +238,26 @@ def run_bot():
                 CommandHandler("cifrar", cifrar),
                 CommandHandler("descifrar", descifrar)
             ],
-            ESPERANDO_ARCHIVO: [
-                MessageHandler(filters.Document.ALL | filters.PHOTO, cifrar_archivo),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, descifrar_archivo)
-            ],
+            ESPERANDO_ARCHIVO: [MessageHandler(filters.Document.ALL | filters.PHOTO, recibir_archivo)],
+            ESPERANDO_SELECCION_DESCIFRAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_seleccion_descifrar)],
+            SELECCION_DESCIFRAR_PARCIAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_descifrado_parcial)],
             ADMIN_MENU: [
                 CommandHandler("agregar_usuario", agregar_usuario),
                 CommandHandler("eliminar_usuario", eliminar_usuario),
                 CommandHandler("salir", salir_admin_menu)
             ],
-            ADMIN_AGREGAR_USUARIO: [MessageHandler(filters.VOICE, procesar_nuevo_usuario)],
+            ADMIN_ESPERANDO_NOMBRE: [MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_nombre_usuario)],
+            ADMIN_ESPERANDO_AUDIO: [MessageHandler(filters.VOICE, procesar_nuevo_usuario)],
             ADMIN_ELIMINAR_USUARIO: [MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_eliminacion_usuario)]
         },
         fallbacks=[CommandHandler("start", start)],
     )
 
-    # Agregar manejador para mensajes no entendidos y errores
     application.add_handler(conv_handler)
     application.add_handler(MessageHandler(filters.ALL, mensaje_no_entendido))
     application.add_error_handler(error_handler)
 
-    try:
-        application.run_polling()
-    finally:
-        # Resetear el estado de verificación cuando el bot se apague
-        for user_id, data in application.user_data.items():
-            data["verificado"] = False
-        logger.info("Bot detenido. Estado de verificación restablecido.")
+    application.run_polling()
 
 if __name__ == "__main__":
     run_bot()
