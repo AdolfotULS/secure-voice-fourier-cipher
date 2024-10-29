@@ -1,99 +1,141 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.fft import fft
+import librosa
+import os
+from datetime import datetime
 
-def plot_waveform(audio_data, sample_rate):
-    """
-    Crea y muestra una visualizacion de la forma de onda del audio
-    """
-    time = np.arange(0, len(audio_data)) / sample_rate
-    plt.figure(figsize=(12, 4))
-    plt.plot(time, audio_data)
-    plt.title('Forma de Onda del Audio')
-    plt.xlabel('Tiempo (s)')
-    plt.ylabel('Amplitud')
-    plt.show()
+class VoiceVisualizer:
+    def __init__(self, output_dir="./data/output"):
+        self.output_dir = output_dir
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
 
-def plot_fourier_transform(fft_result, sample_rate, num_coefficients=10):
-    """
-    Crea y muestra una visualizacion de la Transformada de Fourier del audio
-    y marca los coeficientes mas significativos
-    """
-    frequencies = np.fft.fftfreq(len(fft_result), 1/sample_rate)
-    magnitude = np.abs(fft_result)
-    
-    # Encontrar los indices de los coeficientes mas significativos
-    top_indices = np.argsort(magnitude)[::-1][:num_coefficients]
-    
-    plt.figure(figsize=(12, 8))
-    
-    # Grafico de magnitud
-    plt.subplot(2, 1, 1)
-    plt.plot(frequencies[:len(frequencies)//2], magnitude[:len(frequencies)//2])
-    plt.title('Espectro de Magnitud de la Transformada de Fourier')
-    plt.xlabel('Frecuencia (Hz)')
-    plt.ylabel('Magnitud')
-    plt.xscale('log')
-    plt.grid(True)
-    
-    # Marcar los coeficientes mas significativos
-    for idx in top_indices:
-        if idx < len(frequencies)//2:  # Solo marcar en la mitad positiva del espectro
-            plt.plot(frequencies[idx], magnitude[idx], 'ro')
-            plt.annotate(f'{frequencies[idx]:.2f} Hz', 
-                         (frequencies[idx], magnitude[idx]),
-                         textcoords="offset points",
-                         xytext=(0,10),
-                         ha='center')
-    
-    # Grafico de fase
-    plt.subplot(2, 1, 2)
-    phase = np.angle(fft_result)
-    plt.plot(frequencies[:len(frequencies)//2], phase[:len(frequencies)//2])
-    plt.title('Fase de la Transformada de Fourier')
-    plt.xlabel('Frecuencia (Hz)')
-    plt.ylabel('Fase (radianes)')
-    plt.xscale('log')
-    plt.grid(True)
-    
-    plt.tight_layout()
-    plt.show()
-    
-    # Imprimir los coeficientes mas significativos
-    print("Coeficientes mas significativos:")
-    for idx in top_indices:
-        if idx < len(frequencies)//2:
-            print(f"Frecuencia: {frequencies[idx]:.2f} Hz, Magnitud: {magnitude[idx]:.2f}")
+    def create_visualizations(self, audio_file):
+        """
+        Crea y guarda todas las visualizaciones para un archivo de audio
+        """
+        # Cargar audio
+        y, sr = librosa.load(audio_file, sr=44100)
+        
+        # Crear figura con subplots
+        plt.figure(figsize=(15, 12))
+        
+        # 1. Forma de onda
+        plt.subplot(3, 1, 1)
+        times = np.linspace(0, len(y)/sr, len(y))
+        plt.plot(times, y)
+        plt.title('Forma de Onda')
+        plt.xlabel('Tiempo (s)')
+        plt.ylabel('Amplitud')
+        plt.grid(True)
+        
+        # 2. Espectrograma
+        plt.subplot(3, 1, 2)
+        D = librosa.amplitude_to_db(np.abs(librosa.stft(y)), ref=np.max)
+        librosa.display.specshow(D, y_axis='log', x_axis='time', sr=sr)
+        plt.colorbar(format='%+2.0f dB')
+        plt.title('Espectrograma')
+        
+        # 3. Coeficientes de Fourier
+        plt.subplot(3, 1, 3)
+        fft_result = fft(y)
+        freqs = np.linspace(0, sr, len(fft_result))
+        magnitudes = np.abs(fft_result)
+        
+        # Solo mostrar hasta 5000 Hz para mejor visualización
+        mask = freqs <= 5000
+        plt.semilogy(freqs[mask], magnitudes[mask])
+        plt.title('Espectro de Frecuencias (FFT)')
+        plt.xlabel('Frecuencia (Hz)')
+        plt.ylabel('Magnitud (log)')
+        plt.grid(True)
+        
+        # Ajustar layout
+        plt.tight_layout()
+        
+        # Guardar visualización
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = os.path.join(self.output_dir, f'voice_analysis_{timestamp}.png')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        return output_path
 
-def plot_spectrogram(audio_data, sample_rate):
-    """
-    Crea y muestra un espectrograma del audio
-    """
-    plt.figure(figsize=(12, 8))
-    plt.specgram(audio_data, Fs=sample_rate, cmap='viridis')
-    plt.title('Espectrograma')
-    plt.xlabel('Tiempo')
-    plt.ylabel('Frecuencia')
-    plt.colorbar(label='Intensidad (dB)')
-    plt.show()
+    def create_comparison_plot(self, reference_audio, test_audio):
+        """
+        Crea una visualización comparativa entre el audio de referencia y el de prueba
+        """
+        # Cargar ambos audios
+        y_ref, sr = librosa.load(reference_audio, sr=44100)
+        y_test, sr = librosa.load(test_audio, sr=44100)
+        
+        # Crear figura con subplots
+        plt.figure(figsize=(15, 10))
+        
+        # 1. Comparación de formas de onda
+        plt.subplot(2, 1, 1)
+        times_ref = np.linspace(0, len(y_ref)/sr, len(y_ref))
+        times_test = np.linspace(0, len(y_test)/sr, len(y_test))
+        plt.plot(times_ref, y_ref, label='Referencia', alpha=0.7)
+        plt.plot(times_test, y_test, label='Prueba', alpha=0.7)
+        plt.title('Comparación de Formas de Onda')
+        plt.xlabel('Tiempo (s)')
+        plt.ylabel('Amplitud')
+        plt.legend()
+        plt.grid(True)
+        
+        # 2. Comparación de espectros
+        plt.subplot(2, 1, 2)
+        fft_ref = np.abs(fft(y_ref))
+        fft_test = np.abs(fft(y_test))
+        freqs = np.linspace(0, sr, len(fft_ref))
+        
+        # Solo mostrar hasta 5000 Hz
+        mask = freqs <= 5000
+        plt.semilogy(freqs[mask], fft_ref[mask], label='Referencia', alpha=0.7)
+        plt.semilogy(freqs[mask], fft_test[mask], label='Prueba', alpha=0.7)
+        plt.title('Comparación de Espectros de Frecuencia')
+        plt.xlabel('Frecuencia (Hz)')
+        plt.ylabel('Magnitud (log)')
+        plt.legend()
+        plt.grid(True)
+        
+        # Ajustar layout
+        plt.tight_layout()
+        
+        # Guardar visualización
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = os.path.join(self.output_dir, f'voice_comparison_{timestamp}.png')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        return output_path
 
-# Ejemplo de uso (puede eliminarse en la version final)
+def main():
+    visualizer = VoiceVisualizer()
+    
+    try:
+        # Ruta a los archivos de audio
+        audio_samples_dir = "./data/audio_samples"
+        test_file = os.path.join(audio_samples_dir, "user_input.wav")
+        ref_file = os.path.join(audio_samples_dir, "usuario1_ref_1.wav")
+        
+        # Generar visualizaciones
+        if os.path.exists(test_file):
+            print("Generando visualizaciones del audio de entrada...")
+            analysis_path = visualizer.create_visualizations(test_file)
+            print(f"Visualizaciones guardadas en: {analysis_path}")
+            
+            if os.path.exists(ref_file):
+                print("\nGenerando comparación con audio de referencia...")
+                comparison_path = visualizer.create_comparison_plot(ref_file, test_file)
+                print(f"Comparación guardada en: {comparison_path}")
+        else:
+            print("Archivo de audio no encontrado")
+            
+    except Exception as e:
+        print(f"Error durante la visualización: {str(e)}")
+
 if __name__ == "__main__":
-    # Simular datos de audio para probar las funciones de visualizacion
-    sample_rate = 44100
-    duration = 1  # segundos
-    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
-    
-    # Crear una senal compuesta de varias frecuencias
-    frequencies = [440, 880, 1320, 2000, 3000]  # Hz
-    audio_data = sum(np.sin(2 * np.pi * f * t) for f in frequencies)
-    
-    # Anadir un poco de ruido
-    audio_data += np.random.normal(0, 0.1, len(audio_data))
-    
-    # Calcular la FFT
-    fft_result = np.fft.fft(audio_data)
-    
-    # Visualizar
-    plot_waveform(audio_data, sample_rate)
-    plot_fourier_transform(fft_result, sample_rate, num_coefficients=5)
-    plot_spectrogram(audio_data, sample_rate)
+    main()
