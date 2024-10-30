@@ -48,9 +48,8 @@ class AudioProcessor:
 
 # Ejemplo de uso (puede eliminarse en la versión final)
 if __name__ == "__main__":
-    
     processor = AudioProcessor()
-    processor.load_audio("../data/audio_samples/jeremy_rojas.wav")
+    processor.load_audio("./data/audio_samples/audio.wav")
     processor.preprocess_audio()
     fft_result = processor.apply_fft()
     # Agregar más lógica de prueba según sea necesario
