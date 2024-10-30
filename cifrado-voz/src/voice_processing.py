@@ -124,15 +124,27 @@ class VoiceKeySystem:
             print(f"Error comparing features: {e}")
             return 0
     
-    def verify_voice(self, input_audio_file, similarity_threshold=0.85):
-        """Verifica si la voz coincide con las referencias"""
+    def verify_voice(self, input_audio_file, operation='encrypt', similarity_threshold=0.85):
+        """
+        Verifica si la voz coincide con las referencias y guarda/verifica los datos de autorización
+        
+        Args:
+            input_audio_file: Archivo de audio a verificar
+            operation: 'encrypt' o 'decrypt'
+            similarity_threshold: Umbral de similitud requerido
+            
+        Returns:
+            Dict con resultados de verificación
+        """
         if not self.references:
             raise ValueError("No hay referencias almacenadas")
         
+        # Extraer características
         test_features = self.extract_voice_features(input_audio_file)
         if test_features is None:
             raise ValueError("No se pudo procesar el audio de entrada")
         
+        # Obtener similitudes con referencias
         similarities = []
         for ref in self.references:
             similarity = self.compare_features(ref, test_features)
@@ -141,27 +153,67 @@ class VoiceKeySystem:
         max_similarity = max(similarities)
         avg_similarity = np.mean(similarities)
         
-        # Verificación más estricta
+        # Verificación estricta
         matches = (max_similarity > similarity_threshold and 
-                  avg_similarity > similarity_threshold * 0.9)
-        
+                avg_similarity > similarity_threshold * 0.9)
+
         result = {
             'matches': matches,
             'max_similarity': max_similarity,
             'avg_similarity': avg_similarity,
             'similarities': similarities
         }
-        
+
         if matches:
-            encryption_data = self.prepare_encryption_key(test_features)
-            result['encryption_data'] = encryption_data
-            result['output_files'] = self.save_encryption_data(encryption_data)
+            if operation == 'encrypt':
+                # Para encriptación, generar y guardar nueva clave
+                encryption_data = self.prepare_encryption_key(test_features)
+                result['encryption_data'] = encryption_data
+                result['output_files'] = self.save_encryption_data(encryption_data, operation)
+            else:  # decrypt
+                # Para desencriptación, verificar contra la clave guardada
+                existing_key = self.load_existing_key()
+                if existing_key:
+                    # Generar clave con características actuales
+                    current_key = self.prepare_encryption_key(test_features)
+                    
+                    # Verificar que las claves son compatibles
+                    if self.are_keys_equal(existing_key, current_key):
+                        result['encryption_data'] = current_key
+                        result['output_files'] = {
+                            'binary_file': str(self.output_dir / "voice_key.bin"),
+                            'json_file': str(self.output_dir / "voice_key_data.json")
+                        }
+                    else:
+                        result['matches'] = False
+                        result['message'] = "La voz no coincide con la usada para encriptar"
+                else:
+                    result['matches'] = False
+                    result['message'] = "No se encontró la clave de encriptación original"
         
         return result
+    
+    def hash_features(self, features):
+        """Genera un hash único de las características para comparación"""
+        import hashlib
+        
+        # Concatenar características principales
+        feature_data = np.concatenate([
+            features['mfcc_features'],
+            features['mel_features'][:20],  # Usar primeros 20 coeficientes mel
+            features['fft_features'][:20]   # Usar primeras 20 bandas FFT
+        ])
+        
+        # Normalizar y cuantizar
+        normalized = (feature_data - np.min(feature_data)) / (np.max(feature_data) - np.min(feature_data))
+        quantized = (normalized * 1000).astype(np.int32)
+        
+        # Generar hash
+        return hashlib.sha256(quantized.tobytes()).hexdigest()
 
     def prepare_encryption_key(self, features):
-        """Genera una clave de cifrado a partir de las características"""
-        # Concatenar todas las características en un solo vector
+        """Genera una clave de cifrado más robusta a partir de las características"""
+        # Usar múltiples características para la clave
         feature_vector = np.concatenate([
             features['mfcc_features'],
             features['mel_features'],
@@ -170,25 +222,29 @@ class VoiceKeySystem:
             [features['zero_crossing_rate']]
         ])
         
+        # Normalizar y cuantizar para mayor estabilidad
+        normalized = (feature_vector - np.min(feature_vector)) / (np.max(feature_vector) - np.min(feature_vector))
+        quantized = (normalized * 255).astype(np.uint8)
+        
         # Generar clave de 32 bytes
         key = np.zeros(32, dtype=np.uint8)
         
-        # Hash personalizado
-        for i in range(len(feature_vector)):
-            val = int((feature_vector[i] * 1000) % 256)
+        # Hash personalizado con más variabilidad
+        for i in range(len(quantized)):
+            val = int((quantized[i] * 1000) % 256)
             key[i % 32] ^= val
             key = np.roll(key, 1 if i % 2 == 0 else -1)
-        
-        # Asegurar variabilidad
-        for i in range(1, 32):
-            if key[i] == key[i-1]:
-                key[i] = (key[i] + 173) % 256
+            if i > 0:
+                # Añadir dependencia entre bytes consecutivos
+                key[i % 32] = (key[i % 32] ^ key[(i-1) % 32]) % 256
         
         return {
             'key_bytes': key.tobytes(),
             'key_array': key.tolist(),
+            'features_hash': self.hash_features(features),
             'timestamp': datetime.now().isoformat()
         }
+
 
     def load_existing_key(self):
         """Carga la clave existente si existe"""
@@ -212,15 +268,28 @@ class VoiceKeySystem:
                     print(f"Error deleting file {file}: {str(e)}")
 
     def are_keys_equal(self, key1, key2):
-        """Compara dos claves para ver si son iguales"""
+        """Compara dos claves de manera más robusta"""
         if key1 is None or key2 is None:
             return False
         
-        # Comparar arrays de claves
-        if 'key_array' in key1 and 'key_array' in key2:
-            return key1['key_array'] == key2['key_array']
+        checks = []
         
-        return False
+        # 1. Comparar arrays de claves si existen
+        if 'key_array' in key1 and 'key_array' in key2:
+            checks.append(key1['key_array'] == key2['key_array'])
+        
+        # 2. Comparar hashes de características si existen
+        if 'features_hash' in key1 and 'features_hash' in key2:
+            checks.append(key1['features_hash'] == key2['features_hash'])
+        
+        # 3. Verificar consistencia temporal si es necesario
+        if 'timestamp' in key1 and 'timestamp' in key2:
+            t1 = datetime.fromisoformat(key1['timestamp'])
+            t2 = datetime.fromisoformat(key2['timestamp'])
+            time_diff = abs((t2 - t1).total_seconds())
+            checks.append(time_diff < 3600)  # 1 hora de diferencia máxima
+        
+        return all(checks)
 
     def save_encryption_data(self, encryption_data, operation='encrypt'):
         """Guarda los datos de cifrado manteniendo solo una clave a la vez"""
