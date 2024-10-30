@@ -1,5 +1,3 @@
-    # IGNACIA MIRANDA - NO BORRAR COMENTARIOS PLISS
-
 import numpy as np
 from scipy.fft import fft
 from Crypto.Cipher import AES
@@ -9,46 +7,57 @@ import os
 class Encrypter:
 
     def generate_key(self, fft_coefficients):
-        # Calculamos la magnitud (valor absoluto) de los coeficientes de Fourier
-        fft_abs = np.abs(fft_coefficients)
-
-        # Seleccionamos los primeros 16 valores, los convertimos en enteros sin signo de 8 bits y los transformamos en bytes
-        key = np.array(fft_abs[:16]).astype(np.uint8).tobytes()
-
-        # Si la longitud de la clave es menor a 16 bytes, la rellenamos con ceros para que sea exactamente de 16 bytes
-        if len(key) < 16:
-            key = key.ljust(16, b'0')
-
-        return key  # Devolvemos la clave generada
+        try:
+            # Calcula la magnitud de los coeficientes de Fourier
+            fft_abs = np.abs(fft_coefficients)
+            # Selecciona los primeros 16 valores y los convierte en una cadena de bytes
+            key = np.array(fft_abs[:16]).astype(np.uint8).tobytes()
+            # Asegura que la clave tenga 16 bytes, completando con ceros si es necesario
+            if len(key) < 16:
+                key = key.ljust(16, b'0')
+            return key
+        except Exception as e:
+            print(f"Error al generar la clave: {e}")
+            return None
 
     def encrypt_file(self, file, key):
-        # Generamos un vector de inicialización (IV) de 16 bytes para el modo CFB del cifrado AES
-        iv = get_random_bytes(16)
+        try:
+            # Genera un vector de inicialización (IV) de 16 bytes
+            iv = get_random_bytes(16)
+            # Crea el cifrador AES en modo CFB con la clave y el IV
+            cipher = AES.new(key, AES.MODE_CFB, iv=iv)
+            # Lee y cifra el contenido del archivo original
+            with open(file, 'rb') as f:
+                encrypted_data = cipher.encrypt(f.read())
 
-        # Creamos un cifrador AES en modo CFB usando la clave generada y el IV
-        cipher = AES.new(key, AES.MODE_CFB, iv=iv)
+            # Guarda los datos cifrados junto con el IV en un nuevo archivo con extensión '.enc'
+            encrypted_file = file + '.enc'
+            with open(encrypted_file, 'wb') as f_enc:
+                f_enc.write(iv + encrypted_data)
 
-        # Abrimos el archivo original en modo binario para leer sus datos
-        with open(file, 'rb') as f:
-            encrypted_data = cipher.encrypt(f.read())  # Ciframos el contenido del archivo
-
-        # Guardamos los datos cifrados junto con el IV en un nuevo archivo con extensión '.enc'
-        with open(file + '.enc', 'wb') as f_enc:
-            f_enc.write(iv + encrypted_data)
-
-        return file + '.enc'  # Devolvemos el nombre del archivo cifrado
+            return encrypted_file
+        except Exception as e:
+            print(f"Error al encriptar el archivo {file}: {e}")
+            return None
 
     def decrypt_file(self, encrypted_file, key):
-        # Abrimos el archivo cifrado y leemos los primeros 16 bytes (el IV) y el resto (los datos cifrados)
-        with open(encrypted_file, 'rb') as f_enc:
-            iv = f_enc.read(16)  # Leemos el IV (16 bytes)
-            encrypted_data = f_enc.read()  # Leemos el contenido cifrado restante
+        try:
+            # Lee el IV y los datos cifrados del archivo
+            with open(encrypted_file, 'rb') as f_enc:
+                iv = f_enc.read(16)
+                encrypted_data = f_enc.read()
 
-        # Creamos un cifrador AES en modo CFB usando la misma clave y el IV leído del archivo
-        cipher = AES.new(key, AES.MODE_CFB, iv=iv)
+            # Crea el cifrador AES en modo CFB con la misma clave e IV
+            cipher = AES.new(key, AES.MODE_CFB, iv=iv)
 
-        # Desciframos los datos y los guardamos
-        with open(encrypted_file.replace('.enc', '.dec'), 'wb') as f_dec:
-            f_dec.write(cipher.decrypt(encrypted_data))  # Desciframos y escribimos el contenido
+            # Elimina la extensión '.enc' para restaurar el nombre y extensión originales
+            original_filename = encrypted_file.replace('.enc', '')
 
-        return encrypted_file.replace('.enc', '.dec')  # Devolvemos el nombre del archivo descifrado
+            # Descifra los datos y los guarda en un archivo con el nombre original
+            with open(original_filename, 'wb') as f_dec:
+                f_dec.write(cipher.decrypt(encrypted_data))
+
+            return original_filename
+        except Exception as e:
+            print(f"Error al desencriptar el archivo {encrypted_file}: {e}")
+            return None
