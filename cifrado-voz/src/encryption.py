@@ -52,4 +52,3 @@ class Encrypter:
             f_dec.write(cipher.decrypt(encrypted_data))  # Desciframos y escribimos el contenido
 
         return encrypted_file.replace('.enc', '.dec')  # Devolvemos el nombre del archivo descifrado
-    
