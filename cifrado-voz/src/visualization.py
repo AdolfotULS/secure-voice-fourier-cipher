@@ -4,19 +4,35 @@ from scipy.fft import fft
 import librosa
 import os
 from datetime import datetime
+from pathlib import Path  # Añadida esta importación
 
 class VoiceVisualizer:
     def __init__(self, output_dir="./data/output"):
         self.output_dir = output_dir
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
+            
+    def clean_existing_visualizations(self):
+        """
+        Elimina visualizaciones existentes
+        """
+        # Convertir la ruta a Path si es string
+        output_dir = Path(self.output_dir)
+        for file in output_dir.glob('*.png'):
+            try:
+                file.unlink()
+            except Exception as e:
+                print(f"Error eliminando visualización {file}: {str(e)}")
 
     def create_visualizations(self, audio_file):
         """
-        Crea y guarda todas las visualizaciones para un archivo de audio
+        Crea y guarda las visualizaciones para un archivo de audio
         """
+        # Eliminar visualizaciones existentes
+        self.clean_existing_visualizations()
+        
         # Cargar audio
-        y, sr = librosa.load(audio_file, sr=44100)
+        y, sr = librosa.load(str(audio_file), sr=44100)
         
         # Crear figura con subplots
         plt.figure(figsize=(15, 12))
@@ -55,8 +71,7 @@ class VoiceVisualizer:
         plt.tight_layout()
         
         # Guardar visualización
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = os.path.join(self.output_dir, f'voice_analysis_{timestamp}.png')
+        output_path = str(Path(self.output_dir) / 'voice_analysis.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         
@@ -67,8 +82,8 @@ class VoiceVisualizer:
         Crea una visualización comparativa entre el audio de referencia y el de prueba
         """
         # Cargar ambos audios
-        y_ref, sr = librosa.load(reference_audio, sr=44100)
-        y_test, sr = librosa.load(test_audio, sr=44100)
+        y_ref, sr = librosa.load(str(reference_audio), sr=44100)
+        y_test, sr = librosa.load(str(test_audio), sr=44100)
         
         # Crear figura con subplots
         plt.figure(figsize=(15, 10))
@@ -105,8 +120,7 @@ class VoiceVisualizer:
         plt.tight_layout()
         
         # Guardar visualización
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = os.path.join(self.output_dir, f'voice_comparison_{timestamp}.png')
+        output_path = str(Path(self.output_dir) / 'voice_comparison.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         
@@ -117,17 +131,18 @@ def main():
     
     try:
         # Ruta a los archivos de audio
-        audio_samples_dir = "./data/audio_samples"
-        test_file = os.path.join(audio_samples_dir, "user_input.wav")
-        ref_file = os.path.join(audio_samples_dir, "usuario1_ref_1.wav")
+        base_dir = Path(__file__).parent.parent / "data"
+        audio_samples_dir = base_dir / "audio_samples"
+        test_file = audio_samples_dir / "user_input.wav"
+        ref_file = audio_samples_dir / "usuario1_ref_1.wav"
         
         # Generar visualizaciones
-        if os.path.exists(test_file):
+        if test_file.exists():
             print("Generando visualizaciones del audio de entrada...")
             analysis_path = visualizer.create_visualizations(test_file)
             print(f"Visualizaciones guardadas en: {analysis_path}")
             
-            if os.path.exists(ref_file):
+            if ref_file.exists():
                 print("\nGenerando comparación con audio de referencia...")
                 comparison_path = visualizer.create_comparison_plot(ref_file, test_file)
                 print(f"Comparación guardada en: {comparison_path}")

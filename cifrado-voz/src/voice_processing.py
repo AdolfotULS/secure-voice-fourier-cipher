@@ -1,39 +1,78 @@
+import os
+from pathlib import Path
 import numpy as np
 from scipy.io import wavfile
 from scipy.fft import fft
 from scipy.signal import butter, filtfilt
 import librosa
 import json
-import os
 from datetime import datetime
-import visualization
+from visualization import VoiceVisualizer
 
 class VoiceKeySystem:
-    def __init__(self, base_dir="./data"):
-        self.sample_rate = 44100
-        self.base_dir = base_dir
-        self.audio_samples_dir = os.path.join(base_dir, "audio_samples")
-        self.users_dir = os.path.join(base_dir, "authorized_users")
-        self.output_dir = os.path.join(base_dir, "output")
-        self.auth_user_dir = os.path.join(self.users_dir, "usuario1")  # Solo un usuario autorizado
+    def __init__(self):
+        # Obtener la ruta base del proyecto
+        self.base_dir = Path(__file__).parent.parent / "data"
+        
+        # Definir rutas de directorios
+        self.audio_samples_dir = self.base_dir / "audio_samples"
+        self.users_dir = self.base_dir / "authorized_users"
+        self.output_dir = self.base_dir / "output"
+        self.auth_user_dir = self.users_dir / "usuario1"  # Solo un usuario autorizado
         
         # Crear directorios si no existen
         for directory in [self.audio_samples_dir, self.users_dir, self.output_dir, self.auth_user_dir]:
-            os.makedirs(directory, exist_ok=True)
+            directory.mkdir(parents=True, exist_ok=True)
         
         # Cargar referencias existentes
         self.references = self.load_references()
+
+
+    def clean_output_directory(self, file_pattern):
+        """
+        Elimina archivos antiguos que coincidan con el patrón
+        """
+        for file in self.output_dir.glob(file_pattern):
+            try:
+                file.unlink()
+            except Exception as e:
+                print(f"Error eliminando archivo {file}: {str(e)}")
+                
+    def load_existing_key(self):
+        """
+        Carga la clave existente si existe
+        """
+        try:
+            # Buscar el archivo JSON más reciente
+            json_files = list(self.output_dir.glob("key_data_*.json"))
+            if not json_files:
+                return None
+            
+            # Cargar el archivo JSON
+            with open(json_files[0], 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error cargando clave existente: {str(e)}")
+            return None
+    
+    def are_keys_equal(self, key1, key2):
+        """
+        Compara dos claves para ver si son iguales
+        """
+        if key1 is None or key2 is None:
+            return False
+        return key1.get('key_array') == key2.get('key_array')
+
 
     def load_references(self):
         """
         Carga las referencias de voz existentes del usuario autorizado
         """
         references = []
-        if os.path.exists(self.auth_user_dir):
-            for filename in sorted(os.listdir(self.auth_user_dir)):
-                if filename.endswith('.json'):
-                    with open(os.path.join(self.auth_user_dir, filename), 'r') as f:
-                        references.append(json.load(f))
+        if self.auth_user_dir.exists():
+            for filename in sorted(self.auth_user_dir.glob("*.json")):
+                with open(filename, 'r') as f:
+                    references.append(json.load(f))
         return references
 
     def process_audio(self, audio_file):
@@ -41,10 +80,10 @@ class VoiceKeySystem:
         Procesa el archivo de audio y extrae sus características
         """
         try:
-            y, sr = librosa.load(audio_file, sr=self.sample_rate)
+            y, sr = librosa.load(str(audio_file), sr=44100)
             
             # Aplicar filtro paso banda para frecuencias de voz (300-3400 Hz)
-            b, a = butter(4, [300/self.sample_rate*2, 3400/self.sample_rate*2], btype='band')
+            b, a = butter(4, [300/44100*2, 3400/44100*2], btype='band')
             y_filtered = filtfilt(b, a, y)
             
             # Normalizar la señal
@@ -78,16 +117,13 @@ class VoiceKeySystem:
         """
         Procesa los archivos de referencia del usuario autorizado
         """
-        if not os.path.exists(self.auth_user_dir):
-            os.makedirs(self.auth_user_dir)
+        self.auth_user_dir.mkdir(parents=True, exist_ok=True)
             
-        ref_files = sorted([f for f in os.listdir(self.audio_samples_dir) 
-                          if f.startswith('usuario1_ref') and f.endswith('.wav')])
+        ref_files = sorted(list(self.audio_samples_dir.glob("usuario1_ref*.wav")))
         
         for i, ref_file in enumerate(ref_files, 1):
-            print(f"Procesando referencia {i}: {ref_file}")
-            filepath = os.path.join(self.audio_samples_dir, ref_file)
-            coefficients = self.process_audio(filepath)
+            print(f"Procesando referencia {i}: {ref_file.name}")
+            coefficients = self.process_audio(ref_file)
             if coefficients:
                 self.save_reference(coefficients, i)
                 print(f"Referencia {i} guardada exitosamente")
@@ -99,7 +135,7 @@ class VoiceKeySystem:
         Guarda los coeficientes como referencia
         """
         filename = f"reference_{ref_number}.json"
-        filepath = os.path.join(self.auth_user_dir, filename)
+        filepath = self.auth_user_dir / filename
         
         with open(filepath, 'w') as f:
             json.dump(coefficients, f)
@@ -138,17 +174,32 @@ class VoiceKeySystem:
         """
         Guarda los datos de cifrado en un formato compatible
         """
+        # Verificar si ya existe una clave
+        existing_key = self.load_existing_key()
+        
+        # Si la clave es la misma, no guardamos nuevos archivos
+        if existing_key and self.are_keys_equal(existing_key, encryption_data):
+            print("La clave generada es igual a la existente, usando archivos actuales")
+            return {
+                'binary_file': str(next(self.output_dir.glob("key_*.bin"))),
+                'json_file': str(next(self.output_dir.glob("key_data_*.json")))
+            }
+        
+        # Si la clave es diferente o no existe, limpiamos y guardamos nuevos archivos
+        self.clean_output_directory("key_*.bin")
+        self.clean_output_directory("key_data_*.json")
+        
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         # Guardar clave en formato binario
         bin_filename = f"key_{operation}_{timestamp}.bin"
-        bin_filepath = os.path.join(self.output_dir, bin_filename)
+        bin_filepath = self.output_dir / bin_filename
         with open(bin_filepath, 'wb') as f:
             f.write(encryption_data['key_bytes'])
         
         # Guardar información completa en JSON
         json_filename = f"key_data_{operation}_{timestamp}.json"
-        json_filepath = os.path.join(self.output_dir, json_filename)
+        json_filepath = self.output_dir / json_filename
         
         json_data = {
             'key_array': encryption_data['key_array'],
@@ -161,8 +212,8 @@ class VoiceKeySystem:
             json.dump(json_data, f, indent=2)
         
         return {
-            'binary_file': bin_filepath,
-            'json_file': json_filepath
+            'binary_file': str(bin_filepath),
+            'json_file': str(json_filepath)
         }
 
     def verify_voice(self, input_audio_file, similarity_threshold=0.85, operation='encrypt'):
@@ -201,33 +252,6 @@ class VoiceKeySystem:
             'output_files': output_files
         }
 
-def print_results(result):
-    """
-    Imprime los resultados de la verificación de manera formateada
-    """
-    print("\nResultados de la verificación:")
-    print("-" * 40)
-    
-    if result['matches']:
-        print("✅ Voz autorizada verificada correctamente")
-        print(f"Similitud: {result['max_similarity']:.2%}")
-        
-        if result['output_files']:
-            print("\nArchivos generados:")
-            print(f"Clave binaria: {result['output_files']['binary_file']}")
-            print(f"Datos completos: {result['output_files']['json_file']}")
-            
-            # Mostrar los primeros bytes de la clave
-            key_array = result['encryption_data']['key_array']
-            print("\nPrimeros bytes de la clave (en decimal):")
-            print(key_array[:16])
-    else:
-        print("❌ Voz no autorizada")
-    
-    print("\nSimilitudes con cada referencia:")
-    for i, sim in enumerate(result['similarities'], 1):
-        print(f"Referencia {i}: {sim:.2%}")
-
 def main():
     system = VoiceKeySystem()
     
@@ -239,21 +263,42 @@ def main():
             system.references = system.load_references()
         
         # Verificar voz de entrada
-        input_file = os.path.join(system.audio_samples_dir, "user_input.wav")
-        if os.path.exists(input_file):
+        input_file = system.audio_samples_dir / "user_input.wav"
+        if input_file.exists():
             print("\nVerificando voz de entrada...")
             result = system.verify_voice(input_file, operation='encrypt')
-            print_results(result)
+            
+            print("\nResultados de la verificación:")
+            print("-" * 40)
+            
+            if result['matches']:
+                print("✅ Voz autorizada verificada correctamente")
+                print(f"Similitud: {result['max_similarity']:.2%}")
+                
+                if result['output_files']:
+                    print("\nArchivos generados:")
+                    print(f"Clave binaria: {result['output_files']['binary_file']}")
+                    print(f"Datos completos: {result['output_files']['json_file']}")
+                    
+                    key_array = result['encryption_data']['key_array']
+                    print("\nPrimeros bytes de la clave (en decimal):")
+                    print(key_array[:16])
+                
+                # Generar visualización
+                visualizer = VoiceVisualizer(system.output_dir)
+                vis_path = visualizer.create_visualizations(input_file)
+                print(f"\nVisualización guardada en: {vis_path}")
+            else:
+                print("❌ Voz no autorizada")
+            
+            print("\nSimilitudes con cada referencia:")
+            for i, sim in enumerate(result['similarities'], 1):
+                print(f"Referencia {i}: {sim:.2%}")
         else:
             print(f"Archivo de entrada no encontrado: {input_file}")
             
     except Exception as e:
         print(f"Error durante la ejecución: {str(e)}")
-        
-    if result['matches']:
-        visualizer = visualization.VoiceVisualizer()
-        analysis_path = visualizer.create_visualizations(input_file)
-        print(f"\nVisualización guardada en: {analysis_path}")
 
 if __name__ == "__main__":
     main()
