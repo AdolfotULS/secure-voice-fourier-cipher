@@ -1,90 +1,112 @@
-# test_encrypt.py
-import os
+#!/usr/bin/env python3
 from pathlib import Path
 import sys
+import shutil
 
 # Añadir el directorio src al path de Python
-current_dir = Path(__file__).parent
-project_root = current_dir.parent
+project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root / 'src'))
 
-from voice_processing import VoiceKeySystem
-from encryption import Encrypter
-from visualization import VoiceVisualizer
+from encryption_handler import EncryptionHandler
 
-def test_encrypt():
-    # Configurar directorios usando Path
-    data_dir = project_root / 'data'
-    to_encrypt_dir = data_dir / "to_encrypt"
-    output_dir = data_dir / "output"
+def test_encryption_direct():
+    """
+    Prueba directa de la funcionalidad de encriptación
+    """
+    print("\n=== Test de Encriptación Directo ===\n")
     
-    # Crear directorios si no existen
-    to_encrypt_dir.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # 1. Inicializar el handler
+    handler = EncryptionHandler()
     
-    # Inicializar sistemas
-    voice_system = VoiceKeySystem()
-    encrypter = Encrypter()
-    visualizer = VoiceVisualizer(str(output_dir))
-    
-    try:
-        # 1. Encontrar archivo a cifrar
-        files = [f for f in to_encrypt_dir.glob('*') if f.is_file()]
-        if not files:
-            raise FileNotFoundError("No se encontraron archivos en to_encrypt/")
+    # 2. Mostrar archivos disponibles
+    print("Archivos disponibles para encriptar:")
+    available_files = handler.get_available_files()
+    if not available_files:
+        print("⚠️  No hay archivos en el directorio to_encrypt")
         
-        file_to_encrypt = files[0]
-        print(f"\nArchivo a procesar: {file_to_encrypt}")
-        
-        # 2. PROCESO DE CIFRADO
-        print("\n=== Proceso de Cifrado ===")
-        
-        # Verificar voz para cifrado
-        input_file = data_dir / "audio_samples" / "user_input.wav"
-        print("\nVerificando voz para cifrado...")
-        result = voice_system.verify_voice(str(input_file), operation='encrypt')
-        
-        # Generar visualización
-        vis_path = visualizer.create_visualizations(str(input_file))
-        print(f"Visualización guardada en: {vis_path}")
-        
-        if result['matches']:
-            print("\n✅ Voz autorizada para cifrado")
-            print(f"Similitud: {result['max_similarity']:.2%}")
+        # Crear archivo de prueba
+        test_file = handler.to_encrypt_dir / "test_file.txt"
+        print(f"\nCreando archivo de prueba: {test_file}")
+        with open(test_file, 'w', encoding='utf-8') as f:
+            f.write("Este es un archivo de prueba para encriptación")
             
-            # Generar clave a partir de encryption_data
-            if result['encryption_data']:
-                key = result['encryption_data']['key_bytes']
-                print("\nClave generada para cifrado:", [b for b in key[:8]], "...")
+        available_files = handler.get_available_files()
+
+    # Mostrar archivos
+    for i, file in enumerate(available_files, 1):
+        print(f"{i}. {file}")
+
+    # 3. Permitir selección de archivo
+    while True:
+        try:
+            selection = input("\nSelecciona el número del archivo a encriptar (o 'q' para salir): ")
+            
+            if selection.lower() == 'q':
+                print("\nSaliendo...")
+                break
                 
-                # Cifrar archivo
-                encrypted_file = encrypter.encrypt_file(str(file_to_encrypt), key)
-                if encrypted_file:
-                    encrypted_path = output_dir / Path(encrypted_file).name
-                    
-                    # Si el archivo ya existe en el destino, eliminarlo
-                    if encrypted_path.exists():
-                        encrypted_path.unlink()
-                    
-                    # Mover el archivo cifrado al directorio de salida
-                    os.rename(encrypted_file, encrypted_path)
-                    print(f"\nArchivo cifrado guardado en: {encrypted_path}")
-                else:
-                    print("\nError durante el cifrado del archivo")
+            file_index = int(selection) - 1
+            if 0 <= file_index < len(available_files):
+                selected_file = available_files[file_index]
+                break
             else:
-                print("\nError: No se generaron los datos de encriptación")
-        else:
-            print("\n❌ Voz no autorizada para cifrado")
+                print("❌ Selección inválida. Intenta de nuevo.")
+        except ValueError:
+            print("❌ Por favor ingresa un número válido.")
+
+    # 4. Procesar encriptación
+    print(f"\nProcesando archivo: {selected_file}")
+    result = handler.process_file_encryption(selected_file)
+
+    # 5. Mostrar resultados
+    print("\n=== Resultados ===")
+    if result['success']:
+        print("✅ Encriptación exitosa!")
+        print(f"📁 Archivo encriptado: {result['encrypted_file']}")
+        print(f"🎯 Similitud de voz: {result['similarity']:.2%}")
+        if 'visualization' in result:
+            print(f"📊 Visualización guardada en: {result['visualization']}")
+    else:
+        print(f"❌ Error: {result['message']}")
+        if 'similarity' in result:
+            print(f"🎯 Similitud de voz: {result['similarity']:.2%}")
+
+    # 6. Mostrar contenido de los directorios
+    print("\n=== Estado de los Directorios ===")
+    print("\nDirectorio to_encrypt:")
+    for file in handler.to_encrypt_dir.glob('*'):
+        if file.is_file():
+            print(f"  - {file.name}")
+
+    print("\nDirectorio output:")
+    for file in handler.output_dir.glob('*'):
+        if file.is_file():
+            print(f"  - {file.name}")
+
+def cleanup(handler):
+    """Limpia los archivos de prueba"""
+    try:
+        # Eliminar archivos de prueba
+        test_file = handler.to_encrypt_dir / "test_file.txt"
+        if test_file.exists():
+            test_file.unlink()
+            
+        # Limpiar directorios de salida
+        for file in handler.output_dir.glob('*.enc'):
+            file.unlink()
             
     except Exception as e:
-        print(f"\nError durante el test: {str(e)}")
-        raise
+        print(f"\nError durante la limpieza: {e}")
 
 if __name__ == "__main__":
     try:
-        print("=== Test de Cifrado con Voz ===")
-        test_encrypt()
+        test_encryption_direct()
     except KeyboardInterrupt:
-        print("\nTest interrumpido por el usuario")
+        print("\n\nTest interrumpido por el usuario")
     except Exception as e:
-        print(f"\nError general: {str(e)}")
+        print(f"\nError durante la ejecución: {e}")
+    finally:
+        # Opcional: descomentar para limpiar archivos de prueba
+        # handler = EncryptionHandler()
+        # cleanup(handler)
+        print("\nTest completado")
