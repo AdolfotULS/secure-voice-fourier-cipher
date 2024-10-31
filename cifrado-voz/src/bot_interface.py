@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 # Token del bot
 TOKEN = '7738525810:AAHr_vKE_rKdN5ogOManoz_w7itBxnXo40U'
 
+
 # Definir rutas absolutas
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 AUDIO_DIR = os.path.join('cifrado-voz/data', 'audio_samples')
