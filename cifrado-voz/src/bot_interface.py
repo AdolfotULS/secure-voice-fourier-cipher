@@ -7,6 +7,7 @@ from encryption_handler import EncryptionHandler  # Importar EncryptionHandler
 from decryption_handler import DecryptionHandler
 
 
+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.DEBUG
