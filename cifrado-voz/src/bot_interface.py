@@ -1,10 +1,12 @@
+import sys
 import logging
 import os
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from encryption_handler import EncryptionHandler  # Importar EncryptionHandler
+from decryption_handler import DecryptionHandler
 
-# Configurar registro
+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.DEBUG
@@ -12,11 +14,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Token del bot
-TOKEN = '7738525810:AAHr_vKE_rKdN5ogOManoz_w7itBxnXo40U' 
+TOKEN = '7738525810:AAHr_vKE_rKdN5ogOManoz_w7itBxnXo40U'
 
 # Definir rutas absolutas
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-AUDIO_DIR = os.path.join('cifrado-voz/data', 'audio_samples')  
+AUDIO_DIR = os.path.join('cifrado-voz/data', 'audio_samples')
 TEST_FILES_DIR = os.path.join('cifrado-voz/data', 'test_files')
 OUTPUT_DIR = os.path.join('cifrado-voz/data', 'output')
 TO_ENCRYPT_DIR = os.path.join('cifrado-voz/data', 'to_encrypt')
@@ -31,12 +33,12 @@ os.makedirs(TO_ENCRYPT_DIR, exist_ok=True)
 MOSTRAR_MENU = 1
 ESPERANDO_AUDIO = 2
 ESPERANDO_SELECCION_DESCIFRAR = 3
-SELECCION_DESCIFRAR_PARCIAL = 4
 ESPERANDO_ARCHIVO = 5
-ESPERANDO_SELECCION_ENCRIPTAR = 6  # Nuevo estado para seleccionar archivo para encriptar
+ESPERANDO_SELECCION_ENCRIPTAR = 6
 
-# Instancia de EncryptionHandler
+# Instancia de EncryptionHandler y DecryptionHandler
 encryption_handler = EncryptionHandler()
+decryption_handler = DecryptionHandler()
 
 async def agregar_archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Por favor, envía el archivo que deseas agregar para encriptar.")
@@ -44,18 +46,15 @@ async def agregar_archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def recibir_archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.document:
-        # Obtener el archivo enviado
         archivo = update.message.document
         archivo_path = os.path.join(TO_ENCRYPT_DIR, archivo.file_name)
         
-        # Descargar el archivo a la carpeta `to_encrypt`
         archivo_file = await archivo.get_file()
         await archivo_file.download_to_drive(archivo_path)
         
         await update.message.reply_text(f"Archivo '{archivo.file_name}' recibido y guardado en 'to_encrypt'.")
         return await mostrar_menu(update, context)
     else:
-        # Si no se recibe un archivo válido, pedir al usuario que intente de nuevo
         await update.message.reply_text("No se ha recibido un archivo válido. Por favor, envía un archivo para continuar.")
         return ESPERANDO_ARCHIVO
 
@@ -143,29 +142,42 @@ async def eliminar_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await mostrar_menu(update, context)
 
 async def descifrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    archivos = os.listdir(TEST_FILES_DIR)
-    if archivos:
-        lista_archivos = "\n".join(f"{idx + 1}. {archivo}" for idx, archivo in enumerate(archivos))
+    archivos_para_descifrar = decryption_handler.get_encrypted_files()
+    
+    if archivos_para_descifrar:
+        lista_archivos = "\n".join(f"{idx + 1}. {archivo}" for idx, archivo in enumerate(archivos_para_descifrar))
         await update.message.reply_text(
-            f"Archivos disponibles para descargar:\n{lista_archivos}\n\n"
-            "Por favor, ingresa el número del archivo que deseas recuperar."
+            f"Archivos disponibles para descifrar:\n{lista_archivos}\n\n"
+            "Por favor, ingresa el número del archivo que deseas descifrar."
         )
         return ESPERANDO_SELECCION_DESCIFRAR
     else:
-        await update.message.reply_text("No hay archivos disponibles para descargar.")
+        await update.message.reply_text("No hay archivos encriptados disponibles para descifrar.")
         return MOSTRAR_MENU
 
-async def procesar_seleccion_descifrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def procesar_descifrado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         seleccion = int(update.message.text.strip()) - 1
-        archivos = os.listdir(TEST_FILES_DIR)
+        archivos_para_descifrar = decryption_handler.get_encrypted_files()
         
-        if 0 <= seleccion < len(archivos):
-            archivo_seleccionado = archivos[seleccion]
-            archivo_path = os.path.join(TEST_FILES_DIR, archivo_seleccionado)
+        if 0 <= seleccion < len(archivos_para_descifrar):
+            archivo_seleccionado = archivos_para_descifrar[seleccion]
+            resultado = decryption_handler.process_file_decryption(archivo_seleccionado)
             
-            await update.message.reply_document(document=open(archivo_path, 'rb'))
-            await update.message.reply_text(f"Archivo '{archivo_seleccionado}' recuperado y enviado.")
+            if resultado['success']:
+                with open(resultado['decrypted_file'], 'rb') as file:
+                    await update.message.reply_document(document=file)
+                
+                await update.message.reply_text(
+                    f"✅ Archivo '{archivo_seleccionado}' descifrado exitosamente.\n"
+                    f"Similitud de voz: {resultado.get('similarity', 'N/A')}\n"
+                )
+                if 'visualization' in resultado:
+                    with open(resultado['visualization'], 'rb') as img:
+                        await update.message.reply_photo(photo=img)
+            else:
+                await update.message.reply_text(f"❌ Error: {resultado['message']}")
+            
             return MOSTRAR_MENU
         else:
             await update.message.reply_text("Número inválido. Por favor, selecciona un número de la lista.")
@@ -201,31 +213,29 @@ def run_bot():
     application = Application.builder().token(TOKEN).build()
 
     conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        MOSTRAR_MENU: [
-            CommandHandler("Agregar_archivo", agregar_archivo),  # Nuevo comando para agregar archivo
-            CommandHandler("cifrar", cifrar),
-            CommandHandler("descifrar", descifrar),
-            CommandHandler("grabar_audio", grabar_audio),
-            CommandHandler("eliminar_audio", eliminar_audio),
-            CommandHandler("mostrar_graficos", mostrar_graficos)
-        ],
-        ESPERANDO_AUDIO: [MessageHandler(filters.VOICE, recibir_audio)],
-        ESPERANDO_ARCHIVO: [MessageHandler(filters.Document.ALL, recibir_archivo)],  # Manejo de archivos
-        ESPERANDO_SELECCION_DESCIFRAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_seleccion_descifrar)],
-        SELECCION_DESCIFRAR_PARCIAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_seleccion_descifrar)],
-        
-        # Agrega este estado
-        ESPERANDO_SELECCION_ENCRIPTAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_seleccion_encriptar)]
-    },
-    fallbacks=[CommandHandler("start", start)],
-)
+        entry_points=[CommandHandler("start", start)],
+        states={
+            MOSTRAR_MENU: [
+                CommandHandler("cifrar", cifrar),
+                CommandHandler("descifrar", descifrar),
+                CommandHandler("grabar_audio", grabar_audio),
+                CommandHandler("eliminar_audio", eliminar_audio),
+                CommandHandler("mostrar_graficos", mostrar_graficos),
+                CommandHandler("Agregar_archivo", agregar_archivo),
+            ],
+            ESPERANDO_ARCHIVO: [MessageHandler(filters.Document.ALL, recibir_archivo)],
+            ESPERANDO_SELECCION_ENCRIPTAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_seleccion_encriptar)],
+            ESPERANDO_AUDIO: [MessageHandler(filters.VOICE, recibir_audio)],
+            ESPERANDO_SELECCION_DESCIFRAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_descifrado)],
+        },
+        fallbacks=[CommandHandler("start", start)],
+    )
 
     application.add_handler(conv_handler)
     application.add_handler(MessageHandler(filters.ALL, mensaje_no_entendido))
     application.add_error_handler(error_handler)
 
     application.run_polling()
+
 if __name__ == "__main__":
     run_bot()
