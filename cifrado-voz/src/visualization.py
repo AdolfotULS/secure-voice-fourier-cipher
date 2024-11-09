@@ -2,15 +2,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.fft import fft
 import librosa
+from pathlib import Path
 import os
-from datetime import datetime
-from pathlib import Path  # Añadida esta importación
 
 class VoiceVisualizer:
-    def __init__(self, output_dir="./data/output"):
-        self.output_dir = output_dir
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
+    def __init__(self, output_dir=None):
+        # Obtener la ruta base del proyecto
+        self.base_dir = Path(__file__).parent.parent
+        
+        # Si no se proporciona output_dir, usar la ruta por defecto
+        if output_dir is None:
+            self.output_dir = self.base_dir / "data" / "output"
+        else:
+            self.output_dir = Path(output_dir)
+        
+        # Crear directorio si no existe
+        self.output_dir.mkdir(parents=True, exist_ok=True)
             
     def clean_existing_visualizations(self):
         """
@@ -71,7 +78,7 @@ class VoiceVisualizer:
         plt.tight_layout()
         
         # Guardar visualización
-        output_path = str(Path(self.output_dir) / 'voice_analysis.png')
+        output_path = str(Path(self.output_dir) / 'analisis_voz.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         
@@ -85,15 +92,19 @@ class VoiceVisualizer:
         y_ref, sr = librosa.load(str(reference_audio), sr=44100)
         y_test, sr = librosa.load(str(test_audio), sr=44100)
         
+        # Igualar las longitudes al mínimo
+        min_length = min(len(y_ref), len(y_test))
+        y_ref = y_ref[:min_length]
+        y_test = y_test[:min_length]
+        
         # Crear figura con subplots
         plt.figure(figsize=(15, 10))
         
         # 1. Comparación de formas de onda
         plt.subplot(2, 1, 1)
-        times_ref = np.linspace(0, len(y_ref)/sr, len(y_ref))
-        times_test = np.linspace(0, len(y_test)/sr, len(y_test))
-        plt.plot(times_ref, y_ref, label='Referencia', alpha=0.7)
-        plt.plot(times_test, y_test, label='Prueba', alpha=0.7)
+        times = np.linspace(0, min_length/sr, min_length)
+        plt.plot(times, y_ref, label='Referencia', alpha=0.7)
+        plt.plot(times, y_test, label='Prueba', alpha=0.7)
         plt.title('Comparación de Formas de Onda')
         plt.xlabel('Tiempo (s)')
         plt.ylabel('Amplitud')
@@ -102,11 +113,18 @@ class VoiceVisualizer:
         
         # 2. Comparación de espectros
         plt.subplot(2, 1, 2)
-        fft_ref = np.abs(fft(y_ref))
-        fft_test = np.abs(fft(y_test))
-        freqs = np.linspace(0, sr, len(fft_ref))
         
-        # Solo mostrar hasta 5000 Hz
+        # Calcular FFT con la misma longitud para ambas señales
+        n_fft = 2048  # Tamaño fijo para la FFT
+        fft_ref = np.abs(fft(y_ref, n=n_fft))
+        fft_test = np.abs(fft(y_test, n=n_fft))
+        freqs = np.linspace(0, sr/2, n_fft//2)  # Solo frecuencias positivas
+        
+        # Usar solo la primera mitad del espectro (frecuencias positivas)
+        fft_ref = fft_ref[:n_fft//2]
+        fft_test = fft_test[:n_fft//2]
+        
+        # Aplicar máscara para mostrar solo hasta 5000 Hz
         mask = freqs <= 5000
         plt.semilogy(freqs[mask], fft_ref[mask], label='Referencia', alpha=0.7)
         plt.semilogy(freqs[mask], fft_test[mask], label='Prueba', alpha=0.7)
@@ -120,7 +138,7 @@ class VoiceVisualizer:
         plt.tight_layout()
         
         # Guardar visualización
-        output_path = str(Path(self.output_dir) / 'voice_comparison.png')
+        output_path = str(Path(self.output_dir) / 'comparacion_audios.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         
@@ -130,9 +148,8 @@ def main():
     visualizer = VoiceVisualizer()
     
     try:
-        # Ruta a los archivos de audio
-        base_dir = Path(__file__).parent.parent / "data"
-        audio_samples_dir = base_dir / "audio_samples"
+        # Definir rutas usando Path
+        audio_samples_dir = visualizer.base_dir / "data" / "audio_samples"
         test_file = audio_samples_dir / "user_input.wav"
         ref_file = audio_samples_dir / "usuario1_ref_1.wav"
         
@@ -140,14 +157,16 @@ def main():
         if test_file.exists():
             print("Generando visualizaciones del audio de entrada...")
             analysis_path = visualizer.create_visualizations(test_file)
-            print(f"Visualizaciones guardadas en: {analysis_path}")
+            print(f"Visualización guardada en: {analysis_path}")
             
             if ref_file.exists():
                 print("\nGenerando comparación con audio de referencia...")
                 comparison_path = visualizer.create_comparison_plot(ref_file, test_file)
                 print(f"Comparación guardada en: {comparison_path}")
+            else:
+                print(f"Archivo de referencia no encontrado: {ref_file}")
         else:
-            print("Archivo de audio no encontrado")
+            print(f"Archivo de audio no encontrado: {test_file}")
             
     except Exception as e:
         print(f"Error durante la visualización: {str(e)}")
