@@ -103,6 +103,7 @@ async def recibir_archivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Definir la ruta donde se guardará el archivo en el directorio 'to_encrypt'
         archivo_path = os.path.join(TO_ENCRYPT_DIR, archivo.file_name)
         
+
         # Obtener el archivo completo de Telegram y descargarlo al directorio especificado
         archivo_file = await archivo.get_file()
         await archivo_file.download_to_drive(archivo_path)
@@ -125,7 +126,7 @@ async def mostrar_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         ['/cifrar', '/descifrar'],               # Primera fila de opciones
         ['/grabar_audio', '/eliminar_audio'],    # Segunda fila de opciones
-        ['/mostrar_graficos', '/Agregar_archivo'] # Tercera fila de opciones
+        ['/mostrar_graficos', '/agregar_archivo'] # Tercera fila de opciones
     ]
     
     # Crea un teclado de respuesta (ReplyKeyboardMarkup) para mostrar las opciones al usuario
@@ -359,10 +360,10 @@ def run_bot():
                 CommandHandler("grabar_audio", grabar_audio),
                 CommandHandler("eliminar_audio", eliminar_audio),
                 CommandHandler("mostrar_graficos", mostrar_graficos),
-                CommandHandler("Agregar_archivo", agregar_archivo),
+                CommandHandler("agregar_archivo", agregar_archivo),
             ],
             # Estado en el que el bot espera un archivo del usuario
-            ESPERANDO_ARCHIVO: [MessageHandler(filters.Document.ALL, recibir_archivo)],
+            ESPERANDO_ARCHIVO: [MessageHandler(filters.ALL, recibir_archivo)],
             # Estado en el que el bot espera un texto para la selección de cifrado
             ESPERANDO_SELECCION_ENCRIPTAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_seleccion_encriptar)],
             # Estado en el que el bot espera recibir un mensaje de voz
@@ -370,6 +371,7 @@ def run_bot():
             # Estado en el que el bot espera una selección de descifrado del usuario
             ESPERANDO_SELECCION_DESCIFRAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_descifrado)],
         },
+        
         
         # Comando para reiniciar la conversación
         fallbacks=[CommandHandler("start", start)],
