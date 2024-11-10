@@ -1,81 +1,63 @@
 import numpy as np
-from scipy.linalg import inv
+from scipy.fft import fft
+from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
+import os
 
-class Encryption:
-    def __init__(self):
-        pass
+class Encrypter:
 
     def generate_key(self, fft_coefficients):
-        """
-        Genera una matriz de clave a partir de los coeficientes FFT.
-        Asegura que la matriz generada sea invertible para el cifrado de Hill.
-        """
-        size = int(np.sqrt(len(fft_coefficients)))  # Crear una matriz cuadrada
-        if size * size != len(fft_coefficients):
-            raise ValueError("Los coeficientes FFT deben permitir una matriz cuadrada.")
-        
-        matrix = np.array(fft_coefficients[:size*size]).reshape(size, size)
-        if np.linalg.det(matrix) == 0:
-            raise ValueError("La matriz generada debe ser invertible.")
-        
-        # Asegurar que la matriz sea invertible en aritmetica modular (mod 256 aqui)
-        # Ajustar la matriz para que sea adecuada para el cifrado
-        matrix = np.mod(matrix, 256)
-        return matrix.astype(int)
+        try:
+            # Calcula la magnitud de los coeficientes de Fourier
+            fft_abs = np.abs(fft_coefficients)
+            # Selecciona los primeros 16 valores y los convierte en una cadena de bytes
+            key = np.array(fft_abs[:16]).astype(np.uint8).tobytes()
+            # Asegura que la clave tenga 16 bytes, completando con ceros si es necesario
+            if len(key) < 16:
+                key = key.ljust(16, b'0')
+            return key
+        except Exception as e:
+            print(f"Error al generar la clave: {e}")
+            return None
 
     def encrypt_file(self, file, key):
-        """
-        Cifra un archivo usando la matriz de clave proporcionada.
-        """
-        with open(file, 'rb') as f:
-            data = f.read()
-        
-        # Rellenar para hacer que el tamano de los datos sea un multiplo del tamano de la clave
-        key_size = key.shape[0]
-        if len(data) % key_size != 0:
-            padding_length = key_size - (len(data) % key_size)
-            data += bytes([0] * padding_length)
-        
-        data_array = np.array([data[i:i + key_size] for i in range(0, len(data), key_size)])
-        encrypted_data = []
+        try:
+            # Genera un vector de inicialización (IV) de 16 bytes
+            iv = get_random_bytes(16)
+            # Crea el cifrador AES en modo CFB con la clave y el IV
+            cipher = AES.new(key, AES.MODE_CFB, iv=iv)
+            # Lee y cifra el contenido del archivo original
+            with open(file, 'rb') as f:
+                encrypted_data = cipher.encrypt(f.read())
 
-        for block in data_array:
-            vector = np.array(list(block)).reshape(-1, 1)
-            encrypted_vector = np.mod(np.dot(key, vector), 256).flatten()
-            encrypted_data.extend(encrypted_vector.astype(int).tolist())
+            # Guarda los datos cifrados junto con el IV en un nuevo archivo con extensión '.enc'
+            encrypted_file = file + '.enc'
+            with open(encrypted_file, 'wb') as f_enc:
+                f_enc.write(iv + encrypted_data)
 
-        encrypted_bytes = bytes(encrypted_data)
-
-        # Escribir los datos cifrados en un nuevo archivo
-        encrypted_file = file + '.enc'
-        with open(encrypted_file, 'wb') as f:
-            f.write(encrypted_bytes)
-        
-        return encrypted_file
+            return encrypted_file
+        except Exception as e:
+            print(f"Error al encriptar el archivo {file}: {e}")
+            return None
 
     def decrypt_file(self, encrypted_file, key):
-        """
-        Descifra un archivo usando la matriz de clave proporcionada.
-        """
-        # Calcular la inversa modular de la matriz de clave (mod 256)
-        key_inv = np.round(inv(key)).astype(int) % 256
+        try:
+            # Lee el IV y los datos cifrados del archivo
+            with open(encrypted_file, 'rb') as f_enc:
+                iv = f_enc.read(16)
+                encrypted_data = f_enc.read()
 
-        with open(encrypted_file, 'rb') as f:
-            encrypted_data = f.read()
-        
-        key_size = key.shape[0]
-        data_array = np.array([encrypted_data[i:i + key_size] for i in range(0, len(encrypted_data), key_size)])
-        decrypted_data = []
+            # Crea el cifrador AES en modo CFB con la misma clave e IV
+            cipher = AES.new(key, AES.MODE_CFB, iv=iv)
 
-        for block in data_array:
-            vector = np.array(list(block)).reshape(-1, 1)
-            decrypted_vector = np.mod(np.dot(key_inv, vector), 256).flatten()
-            decrypted_data.extend(decrypted_vector.astype(int).tolist())
+            # Elimina la extensión '.enc' para restaurar el nombre y extensión originales
+            original_filename = encrypted_file.replace('.enc', '')
 
-        decrypted_bytes = bytes(decrypted_data).rstrip(b'\x00')  # Remover relleno
+            # Descifra los datos y los guarda en un archivo con el nombre original
+            with open(original_filename, 'wb') as f_dec:
+                f_dec.write(cipher.decrypt(encrypted_data))
 
-        decrypted_file = encrypted_file.replace('.enc', '_dec')
-        with open(decrypted_file, 'wb') as f:
-            f.write(decrypted_bytes)
-        
-        return decrypted_file
+            return original_filename
+        except Exception as e:
+            print(f"Error al desencriptar el archivo {encrypted_file}: {e}")
+            return None
